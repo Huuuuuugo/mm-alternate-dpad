@@ -6,6 +6,7 @@ from pygetwindow import PyGetWindowException
 import threading
 import time
 import os
+import cv2
 
 keyboard = Controller()
 ocarina = False
@@ -14,21 +15,50 @@ ocarina = False
 def getOcarinaState():
     global ocarina
     wait = 1/3
+    i = 0
+    b_img = cv2.imread("B_Stop.png")
+    c_img = cv2.imread("c.png")
     while True:
-        screen_shot = pyautogui.screenshot(region=(765, 25, 115, 695))
-        # screen_shot = pyautogui.screenshot()
+        time.sleep(0.2)
+        scale_tbl =  [1, 0.99, 0.985, 0.97, 0.965]
+        scale = scale_tbl[i]
+        ofst_y = 25*(scale_tbl.index(scale)+1)
+        ndl_scale = pow(scale, scale_tbl.index(scale)+1)
+        screen_shot = pyautogui.screenshot(region=(int(765*scale), int(ofst_y), int(115*scale), int(695*scale))) #OG
+
+        h = int(b_img.shape[0]*ndl_scale)
+        w = int(b_img.shape[1]*ndl_scale)
+        new_scale = (w, h)
+        b_scaled = cv2.resize(b_img, new_scale, interpolation = cv2.INTER_AREA)
+
+        h = int(c_img.shape[0]*ndl_scale)
+        w = int(c_img.shape[1]*ndl_scale)
+        new_scale = (w, h)
+
+        *_, alpha = cv2.split(c_img)
+        gray_layer = cv2.cvtColor(c_img, cv2.COLOR_BGR2GRAY)
+        dst = cv2.merge((gray_layer, gray_layer, gray_layer, alpha))
+        c_scaled = cv2.resize(dst, new_scale, interpolation=cv2.INTER_AREA)
         try:
-            if pyautogui.locate("B_Stop.png", screen_shot, confidence=0.75):
+            if pyautogui.locate(b_scaled, screen_shot, confidence=0.70):
                 ocarina = True
                 print("Found 'B_Stop.png'")
+                time.sleep(wait)
+                continue
         except pyautogui.ImageNotFoundException:
             try:
-                if pyautogui.locate("c.png", screen_shot, confidence=0.75):
+                if pyautogui.locate(c_scaled, screen_shot, confidence=0.70):
                     ocarina = True
                     print("Found 'c.png'")
+                    time.sleep(wait)
+                    continue
             except pyautogui.ImageNotFoundException:
                 ocarina = False
-        time.sleep(wait)
+        if i == 4:
+            time.sleep(wait)
+            i = 0
+        else:
+            i += 1
 
 
 def sendInput():
