@@ -1,64 +1,144 @@
 import pyautogui
 import xinput_wrapper as xinput
 from pynput.keyboard import Key, Controller
+import numpy as np
+import cv2 as cv
 import pygetwindow as gw
-from pygetwindow import PyGetWindowException
 import threading
 import time
 import os
-import cv2
 
 keyboard = Controller()
+sift = cv.SIFT_create()
+bf = cv.BFMatcher()
 ocarina = False
+
+
+def searchBStop(haystack_img, needle_img):
+    # avoid error on sift.detectAndCompute
+    gray = cv.cvtColor(np.array(haystack_img), cv.COLOR_RGB2GRAY)
+    low = 25000 - np.count_nonzero(gray >= 5)
+    high = np.count_nonzero(gray >= 127)
+    print("B low: ", low)
+    print("B high: ", high)
+    if (low < 1000 or low > 16000 or
+        high < 2500 or high > 15000):
+        # print("Caught")
+        # input()
+        return False
+    kp3, haystack = sift.detectAndCompute(haystack_img,None)
+    matches = bf.knnMatch(needle_img, haystack, k=2)
+    print(len(matches))
+
+    count = 0
+    for m,n in matches:
+        # print(m,n)
+        
+        if m.distance < 0.6*n.distance:
+            return True
+        count += 1
+        if count > 5:
+            break
+    return False
+
+
+def searchLines(gray_img, thresh_val: float):
+    ofst = 0
+    kernel = cv.getStructuringElement(cv.MORPH_RECT, (40,5))
+    thresh = cv.threshold(gray_img, thresh_val, 255, cv.THRESH_BINARY)[1]
+    morph = cv.morphologyEx(thresh, cv.MORPH_RECT, kernel)
+    cv.imwrite("other/__thresh.png", thresh)
+    cv.imwrite("other/__morph.png", morph)
+    while ofst <= 280:
+        height = morph[0:, ofst:ofst+1]
+        # cv2.imwrite("other/__height.png", height)
+        lines = []
+        line = [0, 0]
+        get_line = 0
+
+        # get occurences of possible lines on the image
+        for i, x in enumerate(height):
+            # print(i, x)
+            # input()
+            if not get_line and x[0]:
+                line[0] = i
+                line[1] = i
+                # print(line)
+                get_line = 1
+            elif get_line and not x[0]:
+                line[1] = i-1
+                # print(line)
+                lines.append(line.copy())
+                get_line = 0
+        if len(lines) < 4:
+            ofst += 20
+            continue
+
+        # limit line height to avoid catching huge white stains
+        remove = []
+        for i, line in enumerate(lines):
+            line_height = line[1]-line[0]
+            if line_height < 6 or line_height > 12:
+                remove.append(i)
+        for i, n in enumerate(remove):
+            lines.pop(n-i)
+        # print("height lim: ", lines, len(lines))
+
+        # keep only lines within a limit of spacing between them
+        remove = []
+        for i, _ in enumerate(lines):
+            # print(lines[i])
+            if not i:
+                if len(lines) < 2:
+                    break
+                prv = lines[i][0] - 0
+                nxt = lines[i+1][0] - lines[i][1]
+            elif i == len(lines)-1:
+                prv = lines[i][0] - lines[i-1][1]
+                nxt = 280 - lines[i][1]
+            else:
+                prv = lines[i][0] - lines[i-1][1]
+                nxt = lines[i+1][0] - lines[i][1]
+            # print(prv, nxt, (prv < 18 or prv > 38) and (nxt < 18 or nxt > 38))
+            if (prv < 18 or prv > 38) and (nxt < 18 or nxt > 38):
+                remove.append(i)
+        for i, n in enumerate(remove):
+            lines.pop(n-i)
+        # print("spacing lim: ", lines, len(lines))
+
+        # get density of white pixels do define if it's a vaid line
+        density = 0
+        while len(lines) == 4:
+            for line in lines:
+                width = morph[line[0]:line[1], 0:]
+                line_height = line[1]-line[0]
+                density = (np.count_nonzero(width)/3)/(line_height*400)
+                if density < 0.4:
+                    break
+                # print(line, density)
+            return True
+        ofst += 20
+    return False
 
 
 def getOcarinaState():
     global ocarina
     wait = 1/3
-    i = 0
-    b_img = cv2.imread("B_Stop.png")
-    c_img = cv2.imread("c.png")
+    img1 = cv.imread('B_Stop.png',cv.IMREAD_GRAYSCALE)
+    kp1, b_img = sift.detectAndCompute(img1,None)
     while True:
-        time.sleep(0.2)
-        scale_tbl =  [1, 0.99, 0.985, 0.97, 0.965]
-        scale = scale_tbl[i]
-        ofst_y = 25*(scale_tbl.index(scale)+1)
-        ndl_scale = pow(scale, scale_tbl.index(scale)+1)
-        screen_shot = pyautogui.screenshot(region=(int(765*scale), int(ofst_y), int(115*scale), int(695*scale))) #OG
-
-        h = int(b_img.shape[0]*ndl_scale)
-        w = int(b_img.shape[1]*ndl_scale)
-        new_scale = (w, h)
-        b_scaled = cv2.resize(b_img, new_scale, interpolation = cv2.INTER_AREA)
-
-        h = int(c_img.shape[0]*ndl_scale)
-        w = int(c_img.shape[1]*ndl_scale)
-        new_scale = (w, h)
-
-        *_, alpha = cv2.split(c_img)
-        gray_layer = cv2.cvtColor(c_img, cv2.COLOR_BGR2GRAY)
-        dst = cv2.merge((gray_layer, gray_layer, gray_layer, alpha))
-        c_scaled = cv2.resize(dst, new_scale, interpolation=cv2.INTER_AREA)
-        try:
-            if pyautogui.locate(b_scaled, screen_shot, confidence=0.70):
-                ocarina = True
-                print("Found 'B_Stop.png'")
-                time.sleep(wait)
-                continue
-        except pyautogui.ImageNotFoundException:
-            try:
-                if pyautogui.locate(c_scaled, screen_shot, confidence=0.70):
-                    ocarina = True
-                    print("Found 'c.png'")
-                    time.sleep(wait)
-                    continue
-            except pyautogui.ImageNotFoundException:
-                ocarina = False
-        if i == 4:
-            time.sleep(wait)
-            i = 0
-        else:
-            i += 1
+        screen = pyautogui.screenshot(region=(755, 25, 125, 200))
+        screen = cv.cvtColor(np.array(screen), cv.COLOR_RGB2BGR)
+        # cv.imwrite("other/__screen.png", screen)
+        ocarina = searchBStop(screen, b_img)
+        if not ocarina:
+            screen = pyautogui.screenshot(region=(800, 750, 400, 280))
+            gray = cv.cvtColor(np.array(screen), cv.COLOR_RGB2GRAY)
+            ocarina = searchLines(gray, 40)
+            if not ocarina:
+                ocarina = searchLines(gray, 15)
+        # print(ocarina)
+        time.sleep(wait)
 
 
 def sendInput():
@@ -74,7 +154,7 @@ def sendInput():
                 buttons = gamepad_input.get_button()
                 try:
                     act_win = gw.getActiveWindowTitle()
-                except PyGetWindowException:
+                except gw.PyGetWindowException:
                     print("WHY DOES THIS FUNCTION KEEPS SUDDENLY TRHOWING DIFFERENT ERRORS?????")
                     pass
                 if type(act_win) == str and 'RetroArch' not in act_win:
