@@ -22,7 +22,7 @@ def searchBStop(haystack_img, needle_img):
     # print("B low: ", low)
     # print("B high: ", high)
     if (low < 1000 or low > 16000 or
-        high < 2500 or high > 15000):
+        high < 1000 or high > 15000):
         # print("Caught")
         # input()
         return False
@@ -43,12 +43,14 @@ def searchBStop(haystack_img, needle_img):
 
 
 def searchLines(image):
+    last_red_pixel_pos = [] # pos: y, x
     bin_img = np.array(image)
     for i, line in enumerate(bin_img):
         for j, pixel in enumerate(line):
             # print(pixel)
             if pixel[0] > 100 and pixel[1] < 50 and pixel[2] < 50:
                 bin_img[i][j] = [255, 255, 255]
+                last_red_pixel_pos = [i, j]
             else:
                 bin_img[i][j] = [0, 0, 0]
     # cv.imwrite("other/__binary.png", bin_img)
@@ -89,6 +91,9 @@ def searchLines(image):
                 width = bin_img[line[0]:line[1], ofst:ofst+60]
                 # cv.imwrite("other/__width.png", width)
                 line_height = line[1]-line[0]
+                if not line_height:
+                    rtrn = False
+                    break
                 density = (np.count_nonzero(width)//3)/(line_height*60)
                 # print(ofst, line, density)
                 # input()
@@ -96,49 +101,98 @@ def searchLines(image):
                     rtrn = False
                     break
             if rtrn:
-                return True
+                return True, last_red_pixel_pos
             break
         ofst += 10
-    return False
+    return False, last_red_pixel_pos
 
 
 def getOcarinaState():
     global ocarina
-    wait = 1/3
+    wait = 1/10
+    count = 1
     img1 = cv.imread('B_Stop.png',cv.IMREAD_GRAYSCALE)
     kp1, b_img = sift.detectAndCompute(img1,None)
     while True:
         if not ocarina:
-            print(ocarina)
+            # print(ocarina)
+            lrp_pos = [0, 0]
             screen = pyautogui.screenshot(region=(755, 25, 125, 200))
-            screen = cv.cvtColor(np.array(screen), cv.COLOR_RGB2BGR)
+            screen = np.array(screen)
             # cv.imwrite("other/__screen.png", screen)
             ocarina = searchBStop(screen, b_img)
             if ocarina:
                 continue
 
-            screen = pyautogui.screenshot(region=(1000, 720, 180, 260))
-            searchLines(screen)
-            time.sleep(wait)
+            if count >= 15:
+                screen2 = pyautogui.screenshot(region=(1000, 720, 180, 260))
+                ocarina, lrp_pos = searchLines(screen2)
+                count = 1
+            else:
+                count += 1
+                time.sleep(wait)
         else:
-            screen = pyautogui.screenshot(region=(785, 840, 1, 240))
-            gray = cv.cvtColor(np.array(screen), cv.COLOR_RGB2GRAY)
+            screen = np.array(pyautogui.screenshot(region=(785, 840, 1, 240)))
+            gray = cv.cvtColor(screen, cv.COLOR_RGB2GRAY)
             # cv.imwrite("__gray.png", gray)
-            textbox_check = [gray[0][0], None]
+
+            # gets initial value for textbox_check
+            if lrp_pos[0]:
+                screen2 = np.array(pyautogui.screenshot(region=(1000+lrp_pos[1], 720+lrp_pos[0], 1, 1)))
+                # cv.imwrite("other/__lrp.png", screen2)
+                textbox_check = [screen2[0][0], None]
+            else:
+                textbox_check = [screen[0][0], None]
+            # print(textbox_check[0])
+
+            #gets initial value for the size of the black bar
             for i, x in enumerate(reversed(gray)):
                 if x[0]:
                     size = i
                     break
+
             while True: 
-                print(ocarina)   
-                screen = pyautogui.screenshot(region=(785, 840, 1, 240))
-                gray = cv.cvtColor(np.array(screen), cv.COLOR_RGB2GRAY)
+                # print(ocarina)   
+                screen = np.array(pyautogui.screenshot(region=(785, 840, 1, 240)))
+                gray = cv.cvtColor(screen, cv.COLOR_RGB2GRAY)
                 # cv.imwrite("other/__gray.png", gray)
-                textbox_check[1] = gray[0][0]
-                if textbox_check[1] < textbox_check[0]//2:
-                    print("textbox")
-                    ocarina = False
-                    break
+
+                # gets current texbox_check value
+                if lrp_pos[0]:
+                    screen2 = np.array(pyautogui.screenshot(region=(1000+lrp_pos[1], 720+lrp_pos[0], 1, 1)))
+                    # cv.imwrite("other/__lrp.png", screen2)
+                    textbox_check[1] = screen2[0][0]
+                    # check if new texbox_check value is darker than before
+                    for i in range(3):
+                        old = textbox_check[0][i]
+                        new = textbox_check[1][i]
+                        if new < old//2:
+                            # print("Textbox")
+                            ocarina = False
+                            break
+                    if not ocarina:
+                        break
+                else:
+                    textbox_check[1] = screen[0][0]
+                    # check if new texbox_check value is darker than before
+                    for i in range(3):
+                        old = textbox_check[0][i]
+                        new = textbox_check[1][i]
+                        if new < old//2:
+                            # print("Textbox")
+                            ocarina = False
+                            break
+                    if not ocarina:
+                        break
+
+                    # check if new texbox_check is now red
+                    r, g, b = textbox_check[1][0], textbox_check[1][1], textbox_check[1][2]
+                    if r > 100 and g < 50 and b < 50:
+                        print("Textbox RED")
+                        ocarina = False
+                        break
+
+                # gets current size of black bar
                 for i, x in enumerate(reversed(gray)):
                     # print(i, x[0])
                     if x[0]:
@@ -146,11 +200,10 @@ def getOcarinaState():
                         break
                 print(size, new_size)
                 if size != new_size:
-                    print("size")
+                    # print("Black bar")
                     ocarina = False
                     break
-                time.sleep(wait)
-
+                time.sleep(5*wait)
 
 def sendInput():
     global ocarina
