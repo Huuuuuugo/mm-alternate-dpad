@@ -236,29 +236,16 @@ def sendInput():
                                 pass
                 # 1: up, 2: down, 3: left, 4: right
                 if ocarina:
-                    #TODO: try making something with less if else statements
                     if toggle:
                         keyboard.release('w')
                         keyboard.release('s')
                         keyboard.release('a')
                         keyboard.release('d')
                         toggle = 0
-                    if buttons[1]:
-                        keyboard.press(Key.up)
-                    else:
-                        keyboard.release(Key.up)
-                    if buttons[2]:
-                        keyboard.press(Key.down)
-                    else:
-                        keyboard.release(Key.down)
-                    if buttons[3]:
-                        keyboard.press(Key.left)
-                    else:
-                        keyboard.release(Key.left)
-                    if buttons[4]:
-                        keyboard.press(Key.right)
-                    else:
-                        keyboard.release(Key.right)
+                    keyboard.touch(Key.up, buttons[1])
+                    keyboard.touch(Key.down, buttons[2])
+                    keyboard.touch(Key.left, buttons[3])
+                    keyboard.touch(Key.right, buttons[4])
                 else:
                     if not toggle:
                         keyboard.release(Key.up)
@@ -266,22 +253,10 @@ def sendInput():
                         keyboard.release(Key.left)
                         keyboard.release(Key.right)
                         toggle = 1
-                    if buttons[1]:
-                        keyboard.press('w')
-                    else:
-                        keyboard.release('w')
-                    if buttons[2]:
-                        keyboard.press('s')
-                    else:
-                        keyboard.release('s')
-                    if buttons[3]:
-                        keyboard.press('a')
-                    else:
-                        keyboard.release('a')
-                    if buttons[4]:
-                        keyboard.press('d')
-                    else:
-                        keyboard.release('d')
+                    keyboard.touch('w', buttons[1])
+                    keyboard.touch('s', buttons[2])
+                    keyboard.touch('a', buttons[3])
+                    keyboard.touch('d', buttons[4])
                 time.sleep(wait)
 
 
