@@ -15,6 +15,7 @@ ocarina = False
 
 
 def searchBStop(haystack_img, needle_img):
+    #TODO: figure out why exactly knnMatch raises exceptions when image has too many similar pixels
     # avoid error on sift.detectAndCompute
     gray = cv.cvtColor(np.array(haystack_img), cv.COLOR_RGB2GRAY)
     low = 25000 - np.count_nonzero(gray >= 5)
@@ -26,15 +27,19 @@ def searchBStop(haystack_img, needle_img):
         # print("Caught")
         # input()
         return False
-    kp3, haystack = sift.detectAndCompute(haystack_img,None)
-    matches = bf.knnMatch(needle_img, haystack, k=2)
-    # print(len(matches))
-
+    try:
+        kp3, haystack = sift.detectAndCompute(haystack_img,None)
+        matches = bf.knnMatch(needle_img, haystack, k=2)
+        # print(len(matches))
+    except cv.error:
+        return False
     count = 0
+    # print(matches, len(matches))
+    if len(matches[0]) < 2:
+        return False
     for m,n in matches:
         # print(m,n)
-        
-        if m.distance < 0.6*n.distance:
+        if m.distance < 0.7*n.distance:
             return True
         count += 1
         if count > 5:
@@ -43,17 +48,20 @@ def searchBStop(haystack_img, needle_img):
 
 
 def searchLines(image):
-    last_red_pixel_pos = [] # pos: y, x
+    last_red_pixel_pos = [0, 0] # pos: y, x
     bin_img = np.array(image)
-    for i, line in enumerate(bin_img):
-        for j, pixel in enumerate(line):
+    min_y = len(bin_img)*0.35
+    # cv.imwrite("other/__binary.png", bin_img)
+    for y, line in enumerate(bin_img):
+        if y > min_y and not last_red_pixel_pos[0]:
+            return False, last_red_pixel_pos
+        for x, pixel in enumerate(line):
             # print(pixel)
             if pixel[0] > 100 and pixel[1] < 50 and pixel[2] < 50:
-                bin_img[i][j] = [255, 255, 255]
-                last_red_pixel_pos = [i, j]
+                bin_img[y][x] = [255, 255, 255]
+                last_red_pixel_pos = [y, x]
             else:
-                bin_img[i][j] = [0, 0, 0]
-    # cv.imwrite("other/__binary.png", bin_img)
+                bin_img[y][x] = [0, 0, 0]
 
     ofst = 0
     while ofst <= 200:
@@ -64,52 +72,48 @@ def searchLines(image):
 
         # get occurences of possible lines on the image
         if np.count_nonzero(height) < 40:
-            ofst += 10
+            ofst += 20
             continue
         for i, x in enumerate(height):
             # print(i, x)
             # input()
-            if not get_line and x[0][0]:
+            if not get_line and x[0][0]: # get white pixel and set it's position it to line[0]
                 line[0] = i
                 line[1] = i
                 # print(line)
                 get_line = 1
-            elif get_line and not x[0][0]:
+            elif get_line and not x[0][0]: # get black pixel and set previous position as line[1]
                 line[1] = i-1
                 # print(line)
-                lines.append(line.copy())
+                if line[0] != line[1]:
+                    lines.append(line.copy())
                 get_line = 0
         # print(lines)
-        if len(lines) < 4:
-            ofst += 10
+        if len(lines) != 4:
+            ofst += 20
             continue
 
         density = 0
-        while len(lines) == 4:
-            rtrn = True
-            for line in lines:
-                width = bin_img[line[0]:line[1], ofst:ofst+60]
-                # cv.imwrite("other/__width.png", width)
-                line_height = line[1]-line[0]
-                if not line_height:
-                    rtrn = False
-                    break
-                density = (np.count_nonzero(width)//3)/(line_height*60)
-                # print(ofst, line, density)
-                # input()
-                if density < 0.4:
-                    rtrn = False
-                    break
-            if rtrn:
-                return True, last_red_pixel_pos
-            break
-        ofst += 10
+        rtrn = True
+        for line in lines:
+            width = bin_img[line[0]:line[1], ofst:ofst+60]
+            # cv.imwrite("other/__width.png", width)
+            line_height = line[1]-line[0]
+            density = (np.count_nonzero(width)//3)/(line_height*60)
+            # print(ofst, line, density)
+            # input()
+            if density < 0.4:
+                rtrn = False
+                break
+        if rtrn:
+            return True, last_red_pixel_pos
+        ofst += 20
     return False, last_red_pixel_pos
 
 
 def getOcarinaState():
     global ocarina
-    wait = 1/10
+    wait = 1/8
     count = 1
     img1 = cv.imread('B_Stop.png',cv.IMREAD_GRAYSCALE)
     kp1, b_img = sift.detectAndCompute(img1,None)
@@ -124,13 +128,13 @@ def getOcarinaState():
             if ocarina:
                 continue
 
-            if count >= 15:
+            if count >= 16:
                 screen2 = pyautogui.screenshot(region=(1000, 720, 180, 260))
                 ocarina, lrp_pos = searchLines(screen2)
                 count = 1
             else:
                 count += 1
-                time.sleep(wait)
+            time.sleep(wait)
         else:
             screen = np.array(pyautogui.screenshot(region=(785, 840, 1, 240)))
             gray = cv.cvtColor(screen, cv.COLOR_RGB2GRAY)
@@ -188,7 +192,7 @@ def getOcarinaState():
                     # check if new texbox_check is now red
                     r, g, b = textbox_check[1][0], textbox_check[1][1], textbox_check[1][2]
                     if r > 100 and g < 50 and b < 50:
-                        print("Textbox RED")
+                        # print("Textbox RED")
                         ocarina = False
                         break
 
@@ -198,16 +202,17 @@ def getOcarinaState():
                     if x[0]:
                         new_size = i
                         break
-                print(size, new_size)
+                # print(size, new_size)
                 if size != new_size:
                     # print("Black bar")
                     ocarina = False
                     break
-                time.sleep(5*wait)
+                time.sleep(4*wait)
 
 def sendInput():
     global ocarina
     wait = 1/40
+    toggle = 0
     while True:
         while True:
             gamepads = xinput.GamepadControls.list_gamepads()
@@ -231,10 +236,13 @@ def sendInput():
                                 pass
                 # 1: up, 2: down, 3: left, 4: right
                 if ocarina:
-                    keyboard.release('w')
-                    keyboard.release('s')
-                    keyboard.release('a')
-                    keyboard.release('d')
+                    #TODO: try making something with less if else statements
+                    if toggle:
+                        keyboard.release('w')
+                        keyboard.release('s')
+                        keyboard.release('a')
+                        keyboard.release('d')
+                        toggle = 0
                     if buttons[1]:
                         keyboard.press(Key.up)
                     else:
@@ -252,10 +260,12 @@ def sendInput():
                     else:
                         keyboard.release(Key.right)
                 else:
-                    keyboard.release(Key.up)
-                    keyboard.release(Key.down)
-                    keyboard.release(Key.left)
-                    keyboard.release(Key.right)
+                    if not toggle:
+                        keyboard.release(Key.up)
+                        keyboard.release(Key.down)
+                        keyboard.release(Key.left)
+                        keyboard.release(Key.right)
+                        toggle = 1
                     if buttons[1]:
                         keyboard.press('w')
                     else:
@@ -317,4 +327,4 @@ if count <= timeout:
         except IndexError:
             os.system("taskkill /FI \"WINDOWTITLE eq Majora's Mask.txt*\" /T")
             break
-        time.sleep(3)
+        time.sleep(5)
