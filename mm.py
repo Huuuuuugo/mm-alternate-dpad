@@ -15,31 +15,20 @@ ocarina = False
 
 
 def searchBStop(haystack_img, needle_img):
-    #TODO: figure out why exactly knnMatch raises exceptions when image has too many similar pixels
-    # avoid error on sift.detectAndCompute
-    gray = cv.cvtColor(np.array(haystack_img), cv.COLOR_RGB2GRAY)
-    low = 25000 - np.count_nonzero(gray >= 5)
-    high = np.count_nonzero(gray >= 127)
-    # print("B low: ", low)
-    # print("B high: ", high)
-    if (low < 1000 or low > 16000 or
-        high < 1000 or high > 15000):
-        # print("Caught")
-        # input()
+    kp3, haystack = sift.detectAndCompute(haystack_img, None)
+    if type(haystack) == type(None):
+        # print("TypeError on line 29")
         return False
-    try:
-        kp3, haystack = sift.detectAndCompute(haystack_img,None)
-        matches = bf.knnMatch(needle_img, haystack, k=2)
-        # print(len(matches))
-    except cv.error:
-        return False
+
+    matches = bf.knnMatch(needle_img, haystack, k=2)
     count = 0
-    # print(matches, len(matches))
+
     if len(matches[0]) < 2:
+        # print("Empty matches list")
         return False
+    
     for m,n in matches:
-        # print(m,n)
-        if m.distance < 0.7*n.distance:
+        if m.distance < 0.5*n.distance:
             return True
         count += 1
         if count > 5:
@@ -112,28 +101,47 @@ def searchLines(image):
 
 
 def getOcarinaState():
+    #TODO: fix bug on textbox check
     global ocarina
-    wait = 1/8
-    count = 1
+    wait = 1/10
+    searchLines_counter = 1
+    c_buttons = [9, 13, 15] # indexes for Y, B and RB on 'buttons' list
+    prev_buttons = [0, 0, 0]
+    searchB_counter = 13
     img1 = cv.imread('B_Stop.png',cv.IMREAD_GRAYSCALE)
     kp1, b_img = sift.detectAndCompute(img1,None)
     while True:
+        # print(ocarina)
         if not ocarina:
-            # print(ocarina)
             lrp_pos = [0, 0]
-            screen = pyautogui.screenshot(region=(755, 25, 125, 200))
-            screen = np.array(screen)
-            # cv.imwrite("other/__screen.png", screen)
-            ocarina = searchBStop(screen, b_img)
+            gamepads = xinput.GamepadControls.list_gamepads()
+            with gamepads[0] as gamepad_input:
+                buttons = np.array(list(gamepad_input.get_button().values()))[c_buttons]
+                buttons_changed = (buttons != prev_buttons)
+                if (buttons_changed.any() and 
+                    (buttons[0] or buttons[1] or buttons[2])):
+                    searchB_counter = 0
+                if searchB_counter >= 5 and searchB_counter <= 12:
+                    # print(ocarina)
+                    screen = pyautogui.screenshot(region=(755, 25, 125, 200))
+                    screen = np.array(screen)
+                    # cv.imwrite("other/__screen.png", screen)
+                    ocarina = searchBStop(screen, b_img)
+                    print(f"try searchBStop {searchB_counter}")
+                prev_buttons = buttons.copy()
+                if searchB_counter < 13:
+                    searchB_counter += 1
             if ocarina:
+                searchB_counter = 13
+                time.sleep(wait)
                 continue
 
-            if count >= 16:
+            if searchLines_counter >= 20:
                 screen2 = pyautogui.screenshot(region=(1000, 720, 180, 260))
                 ocarina, lrp_pos = searchLines(screen2)
-                count = 1
+                searchLines_counter = 1
             else:
-                count += 1
+                searchLines_counter += 1
             time.sleep(wait)
         else:
             screen = np.array(pyautogui.screenshot(region=(785, 840, 1, 240)))
@@ -171,7 +179,7 @@ def getOcarinaState():
                         old = textbox_check[0][i]
                         new = textbox_check[1][i]
                         if new < old//2:
-                            # print("Textbox")
+                            print("Textbox")
                             ocarina = False
                             break
                     if not ocarina:
@@ -183,7 +191,7 @@ def getOcarinaState():
                         old = textbox_check[0][i]
                         new = textbox_check[1][i]
                         if new < old//2:
-                            # print("Textbox")
+                            print("Textbox")
                             ocarina = False
                             break
                     if not ocarina:
@@ -204,14 +212,15 @@ def getOcarinaState():
                         break
                 # print(size, new_size)
                 if size != new_size:
-                    # print("Black bar")
+                    print("Black bar")
                     ocarina = False
                     break
-                time.sleep(4*wait)
+                time.sleep(5*wait)
+
 
 def sendInput():
     global ocarina
-    wait = 1/40
+    wait = 1/50
     toggle = 0
     while True:
         while True:
@@ -219,15 +228,17 @@ def sendInput():
             if not len(gamepads):
                 time.sleep(1)
                 break
+
             with gamepads[0] as gamepad_input:
-                buttons = gamepad_input.get_button()
+                buttons = list(gamepad_input.get_button().values())
                 try:
                     act_win = gw.getActiveWindowTitle()
                 except gw.PyGetWindowException:
-                    print("WHY DOES THIS FUNCTION KEEPS SUDDENLY TRHOWING DIFFERENT ERRORS?????")
+                    # print("raised gw.PyGetWindowException at line 238")
                     pass
+
                 if type(act_win) == str and 'RetroArch' not in act_win:
-                    for button in buttons:
+                    for button in range(len(buttons)):
                         if buttons[button]:
                             try:
                                 win = gw.getWindowsWithTitle('RetroArch')[0]
@@ -242,10 +253,11 @@ def sendInput():
                         keyboard.release('a')
                         keyboard.release('d')
                         toggle = 0
-                    keyboard.touch(Key.up, buttons[1])
-                    keyboard.touch(Key.down, buttons[2])
-                    keyboard.touch(Key.left, buttons[3])
-                    keyboard.touch(Key.right, buttons[4])
+                    keyboard.touch(Key.up, buttons[0])
+                    keyboard.touch(Key.down, buttons[1])
+                    keyboard.touch(Key.left, buttons[2])
+                    keyboard.touch(Key.right, buttons[3])
+
                 else:
                     if not toggle:
                         keyboard.release(Key.up)
@@ -253,53 +265,43 @@ def sendInput():
                         keyboard.release(Key.left)
                         keyboard.release(Key.right)
                         toggle = 1
-                    keyboard.touch('w', buttons[1])
-                    keyboard.touch('s', buttons[2])
-                    keyboard.touch('a', buttons[3])
-                    keyboard.touch('d', buttons[4])
+                    keyboard.touch('w', buttons[0])
+                    keyboard.touch('s', buttons[1])
+                    keyboard.touch('a', buttons[2])
+                    keyboard.touch('d', buttons[3])
                 time.sleep(wait)
 
 
-T_getOcarinaState = threading.Thread(target=getOcarinaState, daemon=True)
-T_sendInput = threading.Thread(target=sendInput, daemon=True)
+if __name__ == "__main__":
+    T_getOcarinaState = threading.Thread(target=getOcarinaState, daemon=True)
+    T_sendInput = threading.Thread(target=sendInput, daemon=True)
 
-print("RUNNING, EXIT RETROARCH TO STOP\n")
+    print("RUNNING, EXIT RETROARCH TO STOP\n")
 
-# wait for retroarch to open
-timeout = 5
-count = 0
-while count <= timeout:
-    try:
-        gw.getWindowsWithTitle('RetroArch')[0]
-        break
-    except IndexError:
-        pass
-    time.sleep(1)
-    count += 1
-
-T_getOcarinaState.start()
-T_sendInput.start()
-
-T_getOcarinaState.join(0)
-T_sendInput.join(0)
-
-if count <= timeout:
-    while True:
-        if not T_sendInput.is_alive():
-            T_sendInput = None
-            T_sendInput = threading.Thread(target=sendInput, daemon=True)
-            T_sendInput.start()
-            T_sendInput.join(0)
-        if not T_getOcarinaState.is_alive():
-            T_getOcarinaState = None
-            T_getOcarinaState = threading.Thread(target=getOcarinaState, daemon=True)
-            T_getOcarinaState.start()
-            T_getOcarinaState.join(0)
-            
-        # check if retroarch still running
+    # wait for retroarch to open
+    timeout = 5
+    count = 0
+    while count <= timeout:
         try:
             gw.getWindowsWithTitle('RetroArch')[0]
-        except IndexError:
-            os.system("taskkill /FI \"WINDOWTITLE eq Majora's Mask.txt*\" /T")
             break
-        time.sleep(5)
+        except IndexError:
+            pass
+        time.sleep(1)
+        count += 1
+
+    T_getOcarinaState.start()
+    T_sendInput.start()
+
+    T_getOcarinaState.join(0)
+    T_sendInput.join(0)
+
+    if count <= timeout:
+        while True:               
+            # check if retroarch still running
+            try:
+                gw.getWindowsWithTitle('RetroArch')[0]
+            except IndexError:
+                os.system("taskkill /FI \"WINDOWTITLE eq Majora's Mask.txt*\" /T")
+                break
+            time.sleep(3)
