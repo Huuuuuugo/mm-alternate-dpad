@@ -101,7 +101,8 @@ def searchLines(image):
 
 
 def getOcarinaState():
-    #TODO: fix bug on textbox check
+    #TODO: adjust sleep times to avoid not detecting c_buttons and also detect ocarina quicker
+    #TODO: fix textbox check not working propperly on goron link
     global ocarina
     wait = 1/10
     searchLines_counter = 1
@@ -115,6 +116,9 @@ def getOcarinaState():
         if not ocarina:
             lrp_pos = [0, 0]
             gamepads = xinput.GamepadControls.list_gamepads()
+            if not len(gamepads):
+                time.sleep(1)
+                continue
             with gamepads[0] as gamepad_input:
                 buttons = np.array(list(gamepad_input.get_button().values()))[c_buttons]
                 buttons_changed = (buttons != prev_buttons)
@@ -144,18 +148,24 @@ def getOcarinaState():
                 searchLines_counter += 1
             time.sleep(wait)
         else:
-            screen = np.array(pyautogui.screenshot(region=(785, 840, 1, 240)))
+            prev_total = 0
+            activate_texbox_check = False
+            textbox_double_check = False
+            textbox_counter = 1
+            screen = np.array(pyautogui.screenshot(region=(985, 840, 1, 240)))
             gray = cv.cvtColor(screen, cv.COLOR_RGB2GRAY)
             # cv.imwrite("__gray.png", gray)
 
-            # gets initial value for textbox_check
+            # gets initial value for textbox_values
             if lrp_pos[0]:
                 screen2 = np.array(pyautogui.screenshot(region=(1000+lrp_pos[1], 720+lrp_pos[0], 1, 1)))
                 # cv.imwrite("other/__lrp.png", screen2)
-                textbox_check = [screen2[0][0], None]
+                textbox_values = [np.array(screen2[0][0], dtype=np.uint16), None]
+                first_total = textbox_values[0][0] + textbox_values[0][1] + textbox_values[0][2]
             else:
-                textbox_check = [screen[0][0], None]
-            # print(textbox_check[0])
+                textbox_values = [np.array(screen[0][0], dtype=np.uint16), None]
+                first_total = textbox_values[0][0] + textbox_values[0][1] + textbox_values[0][2]
+            # print(textbox_values[0])
 
             #gets initial value for the size of the black bar
             for i, x in enumerate(reversed(gray)):
@@ -165,44 +175,50 @@ def getOcarinaState():
 
             while True: 
                 # print(ocarina)   
-                screen = np.array(pyautogui.screenshot(region=(785, 840, 1, 240)))
+                screen = np.array(pyautogui.screenshot(region=(985, 840, 1, 240)))
                 gray = cv.cvtColor(screen, cv.COLOR_RGB2GRAY)
                 # cv.imwrite("other/__gray.png", gray)
 
                 # gets current texbox_check value
                 if lrp_pos[0]:
-                    screen2 = np.array(pyautogui.screenshot(region=(1000+lrp_pos[1], 720+lrp_pos[0], 1, 1)))
+                    screen_lrp = np.array(pyautogui.screenshot(region=(1000+lrp_pos[1], 720+lrp_pos[0], 1, 1)))
                     # cv.imwrite("other/__lrp.png", screen2)
-                    textbox_check[1] = screen2[0][0]
-                    # check if new texbox_check value is darker than before
-                    for i in range(3):
-                        old = textbox_check[0][i]
-                        new = textbox_check[1][i]
-                        if new < old//2:
-                            print("Textbox")
-                            ocarina = False
-                            break
-                    if not ocarina:
-                        break
-                else:
-                    textbox_check[1] = screen[0][0]
-                    # check if new texbox_check value is darker than before
-                    for i in range(3):
-                        old = textbox_check[0][i]
-                        new = textbox_check[1][i]
-                        if new < old//2:
-                            print("Textbox")
-                            ocarina = False
-                            break
-                    if not ocarina:
-                        break
-
-                    # check if new texbox_check is now red
-                    r, g, b = textbox_check[1][0], textbox_check[1][1], textbox_check[1][2]
-                    if r > 100 and g < 50 and b < 50:
-                        # print("Textbox RED")
+                    textbox_values[1] = np.array(screen_lrp[0][0], dtype=np.uint16)
+                    r, g, b = textbox_values[1][0], textbox_values[1][1], textbox_values[1][2]
+                    if (r < 100 or r < g + b):
+                        print("Textbox")
                         ocarina = False
                         break
+
+                else:
+                    textbox_values[1] = np.array(screen[0][0], dtype=np.uint16)
+                    total = textbox_values[1][0] + textbox_values[1][1] + textbox_values[1][2]
+                    if prev_total == total and not activate_texbox_check:
+                        first_total = total
+                        if textbox_double_check:
+                            print("Textbox Activated")
+                            activate_texbox_check = True
+                        textbox_double_check = True
+                    else:
+                        textbox_double_check = False
+
+                    print(textbox_values)
+                    print(total)
+                    cv.imwrite("tests/results/__texbox.png", screen)
+
+                    if activate_texbox_check and total != first_total:
+                        print("Textbox")
+                        ocarina = False
+                        break
+
+                    if not activate_texbox_check and textbox_counter > 12:
+                        if total < 0.6*prev_total and total < 100:
+                            print("Textbox2")
+                            ocarina = False
+                            break
+
+                    prev_total = total
+                    textbox_counter += 1
 
                 # gets current size of black bar
                 for i, x in enumerate(reversed(gray)):
